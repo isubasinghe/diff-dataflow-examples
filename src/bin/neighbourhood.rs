@@ -1,6 +1,12 @@
 use graphs::{Iter, Node};
-use timely::dataflow::operators::ToStream;
-
+use timely::dataflow::operators::{ToStream, Map};
+use differential_dataflow::input::Input;
+use differential_dataflow::operators::Iterate;
+use timely::dataflow::operators::Enter;
+use differential_dataflow::operators::join::Join;
+use differential_dataflow::operators::reduce::Threshold;
+use differential_dataflow::collection::{AsCollection};
+use differential_dataflow::operators::consolidate::Consolidate;
 fn main() {
 
     timely::execute_from_args(std::env::args(), |worker| {
@@ -31,10 +37,10 @@ fn main() {
         let mut probe = timely::dataflow::ProbeHandle::new();
 
         let mut sources = worker.dataflow(|scope| {
-            let graph = 
+            let edges = 
             edges
                 .to_stream(scope)
-                .map(|edge| (edge, 0, 1) )
+                .map(|edge| edge)
                 .as_collection();
             
             let (handle, source) = scope.new_collection();
@@ -46,7 +52,7 @@ fn main() {
                 let souce = source.enter(&inner.scope());
 
                 inner
-                    .filter(|node, steps|  steps > 0)
+                    .filter(|(_, (_, steps))|  steps > &0)
                     .join_map(&edges, |&node, &steps, &dest| (dest, (node, steps-1)))
                     .concat(&source)
                     .distinct()
@@ -54,7 +60,7 @@ fn main() {
                     .map(|(node, )| node)
                     .consolidate()
                     .inspect(|x| println!("{:?}\t{}", timer.elapsed(), x))
-                    .probe_with(&mut probe);
+                    .probe_with(&mut probe)
             
             });
             handle
@@ -69,7 +75,7 @@ fn main() {
 
         println!("{:?}\tComputation stable", timer.elapsed());
 
-        sources.insert(source);
+        sources.insert((source, steps));
         sources.advance_to(2);
         sources.flush();
         
