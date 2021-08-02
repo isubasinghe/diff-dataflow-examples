@@ -3,10 +3,8 @@ use graphs::{Iter, Node};
 use timely::dataflow::operators::{ToStream, Map};
 use differential_dataflow::input::Input;
 use differential_dataflow::operators::Iterate;
-use timely::dataflow::operators::Enter;
 use differential_dataflow::operators::join::Join;
 use differential_dataflow::operators::reduce::Threshold;
-use differential_dataflow::collection::Collection;
 use differential_dataflow::operators::consolidate::Consolidate;
 fn main() {
 
@@ -35,7 +33,10 @@ fn main() {
 
         println!("{:?}\t Loaded {} edges", timer.elapsed(), edges.len());
 
-        let sources = worker.dataflow(|scope| {
+        let mut probe = timely::dataflow::ProbeHandle::new();
+
+        let mut sources = worker.dataflow(|scope| {
+            let timer = timer.clone();
             let edges = edges
             .to_stream(scope)
             .map(|edge| (edge, 0, 1))
@@ -44,19 +45,51 @@ fn main() {
 
             let (handle, source) = scope.new_collection();
             
+            let source = source.map(|(node, steps)| (node, (node, steps)));
+
+            let neighbours = 
             source
                 .iterate(|inner| {
                     let edges = edges.enter(&inner.scope());
+                    let source = source.enter(&inner.scope());
+
                     inner
-                    .filter(|(node, (root, steps))| steps > 0)
-                    .join_map(&edges, |&node, &steps, &dest| (dest, (node, steps-1)))
-                    .concat()
+                    .filter(|(_node, (_root, steps))| steps > &0)
+                    .join_map(&edges, |&_node, &(source, steps), &dest| (dest, (source, steps-1)))
+                    .concat(&source)
+                    .consolidate()
+                    .distinct()
                 })
-
+                .map(|(dest, (node, _))| (node, dest))
+                .distinct()
+                .filter(move |_| inspect)
+                .map(|(node, _)| node)
+                .consolidate()
+                .inspect(move | (x, _, _)| println!("{:?}\t{}", timer.elapsed(), x))
+                .probe_with(&mut probe);
             handle
+            
+        });
+
+        sources.advance_to(1);
+        sources.flush();
 
 
+        while probe.less_than(sources.time()) {
+            worker.step();
+        }
 
-        }) 
+        println!("{:?} Computation stable", timer.elapsed());
+
+        sources.insert((source, steps));
+        sources.advance_to(2);
+        sources.flush();
+
+        while probe.less_than(sources.time()) {
+            worker.step();
+        }
+
+        println!("{:?} Computation completed", timer.elapsed());
+
     }).expect("Timely failed to start");
 }
