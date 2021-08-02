@@ -65,7 +65,7 @@ fn main() {
                 .filter(move |_| inspect)
                 .map(|(node, _)| node)
                 .consolidate()
-                .inspect(move | (x, _, _)| println!("{:?}\t{}", timer.elapsed(), x))
+                .inspect(move | x| println!("{:?}\tNeighbours:\t{:?}", timer.elapsed(), x))
                 .probe_with(&mut probe);
             handle
             
