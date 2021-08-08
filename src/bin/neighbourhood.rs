@@ -1,5 +1,7 @@
-use differential_dataflow::AsCollection;
-use graphs::{Iter, Node};
+use differential_dataflow::lattice::Lattice;
+use differential_dataflow::{AsCollection, Collection};
+use graphs::{Iter, Node, Edge};
+use timely::dataflow::Scope;
 use timely::dataflow::operators::{ToStream, Map};
 use differential_dataflow::input::Input;
 use differential_dataflow::operators::Iterate;
@@ -92,4 +94,25 @@ fn main() {
         println!("{:?} Computation completed", timer.elapsed());
 
     }).expect("Timely failed to start");
+}
+
+
+fn neighbourhoods<G>(edges: Collection<G, Edge<Node>>, source: Collection<G, (Node, Iter)>) -> Collection<G, (Node, Node)> 
+    where 
+        G: Scope,
+        G::Timestamp:differential_dataflow::lattice::Lattice  
+    {
+        let source = source.map(|(node, steps)| (node, (node, steps)));
+    source.iterate(|inner| {
+        let edges = edges.enter(&inner.scope());
+        let source = source.enter(&inner.scope());
+
+        inner
+        .filter(|(_node, (_root, steps))| steps > &0)
+        .join_map(&edges, |_node, &(source, steps), &dest| (dest, (source, steps-1)))
+        .concat(&source)
+        .distinct()
+    })
+    .map(|(dest, (node, _))| (node, dest))
+    .distinct()
 }
